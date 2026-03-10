@@ -1,223 +1,569 @@
-import {defineStore} from 'pinia'
-import WebSocketAPI from "../../socket";
-import {Action, ElMessage, ElMessageBox} from "element-plus";
-import useUserStore from "@/store/modules/user.ts";
-import {connect} from "socket.io-client";
-import router from "@/router";
-// export default {
-//     setup() {
-//         const userStore = useUserStore();
-//         const router = useRouter();
-//     return {
-//         userStore,
-//         router
-//     }
-//     }
-// }
+import { defineStore } from 'pinia'
+import { ElMessage } from 'element-plus'
+import WebSocketAPI from '../../socket'
+import useUserStore from '@/store/modules/user.ts'
+
 const config = {
-    iceServers: [{
-        urls: "stun:stun.l.google.com:19302",
-    }]
+  iceServers: [{
+    urls: 'stun:stun.l.google.com:19302',
+  }],
 }
 
-const constraints = {
-    video: {
-        width: {min: 640, ideal: 1920, max: 1920}, height: {min: 480, ideal: 1080, max: 1080},
-    }, audio: true
+const audioOnlyConstraints: MediaStreamConstraints = {
+  audio: true,
+  video: false,
 }
+
+const videoOnlyConstraints: MediaStreamConstraints = {
+  video: {
+    width: { min: 640, ideal: 1280, max: 1920 },
+    height: { min: 480, ideal: 720, max: 1080 },
+  },
+  audio: false,
+}
+
 const offerOptions = {
-    offerToReceiveVideo: true, offerToReceiveAudio: true,
+  offerToReceiveVideo: true,
+  offerToReceiveAudio: true,
+}
+
+const INVITE_TIMEOUT_MS = 30000
+
+type CallStatus = 'idle' | 'inviting' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed'
+
+type RejectReason = 'rejected' | 'hangup' | 'timeout' | 'busy' | 'offline'
+
+interface IncomingCall {
+  offer: RTCSessionDescriptionInit
+  sourceName: string
+  targetName: string
 }
 
 export const useSignalChannel = defineStore('webRTC', {
-    state: () => ({
-        socket: null, pc: null, localStream: null, remoteStream: null,source:null,target:null,router:null
-    }), actions: {
-        connect(router:any) {
-           if (this.router==null&&router!=null)
-             this.router = router
-            this.socket = new WebSocketAPI('/online-status', (data)=>{
-                console.log(data)
-            }, true,useUserStore().token)
-            this.socket.setOnReceiveAnswer(this.onReceiveAnswer)
-            this.socket.setOnReceiveOffer(this.onReceiveOffer)
-            this.socket.setOnReceiveICE(this.onReceiveIce)
-            this.socket.setOnReject(this.onReceiveReject)
-            this.source = useUserStore().uid
-        },
-        initRTC(target: string): Promise<MediaStream | null> {
-            if(this.localStream!=null)//如果已经有流了，直接返回
-                return new Promise((resolve, reject) => {
-                    resolve(this.localStream);
-                })
-            this.target = target
-            // this.connect()
-            return new Promise((resolve, reject) => {
-                console.log(this.socket);
-                this.pc = new RTCPeerConnection(config);
-                console.log(this.pc);
-                navigator.mediaDevices.getUserMedia(constraints)
-                    .then((stream: MediaStream) => {
-                        this.localStream = stream;
-                        console.log("STREAM" + stream);
-                        stream.getTracks().forEach((track: MediaStreamTrack) =>
-                            this.pc.addTrack(track, this.localStream));
-                        this.pc.createOffer(offerOptions)
-                            .then((offer: RTCSessionDescriptionInit) => {
-                                this.pc.setLocalDescription(offer);
-                                this.socket.send({
-                                    type: 'offer',
-                                    offer,
-                                    sourceName:  this.source,
-                                    targetName: this.target,
-                                });
-                            });
-                        this.pc.onicecandidate = (event) => {
-                            if (event.candidate) {
-                                this.socket.send({
-                                    type: 'ice',
-                                    iceCandidate: event.candidate,
-                                    sourceName:  this.source,
-                                    targetName: this.target,
-                                });
-                            }
-                        };
-                        this.pc.ontrack = (event:any) => {
-                            // ElMessage.success('ontrack')
-                            this.remoteStream = event.streams[0];
-                            console.log("RemoteStream");
-                            console.log(this.remoteStream);
-                        };
-                        resolve(this.localStream); // 成功获取流后，使用 resolve 返回
-                    })
-                    .catch((error) => {
-                        // ElMessage.error('getUserMedia error');
-                        console.log(error.code);
-                        console.log(error.name);
-                        reject(error); // 遇到错误时，使用 reject 传递错误信息
-                    });
-            });
-        }, onReceiveOffer(data: any) {
-            // ElMessage.success('onReceiveOffer')
-            const {type, offer, sourceName,targetName} = data;
-            ElMessageBox.confirm(
-                '收到用户' + sourceName + '的视频通话请求，是否接受？',
-                '视频通话请求',
-                {
-                    confirmButtonText: '接收',
-                    cancelButtonText: '拒绝',
-                    type: 'warning',
-                }
-            )
-                .then(() => {
-                    ElMessage({
-                        type: 'success',
-                        message: '接受成功',
-                    })
-                    this.pc = new RTCPeerConnection(config);
-                    navigator.mediaDevices.getUserMedia(constraints)
-                        .then((stream: MediaStream) => {
-                            this.localStream = stream;
-                            this.localStream.getTracks().forEach((track: MediaStreamTrack) => this.pc.addTrack(track, this.localStream))
-                            this.pc.setRemoteDescription(new RTCSessionDescription(offer));
-                            //设置远端描述
-                            this.pc.createAnswer().then((answer:any)=> {
-                                this.pc.setLocalDescription(answer);
-                                this.socket.send({
-                                    type: 'answer', answer, sourceName:  targetName,targetName: sourceName,
-                                });
-                            });
-                            this.pc.onicecandidate = (event:any) => {
-                                if (event.candidate) {
-                                    this.socket.send({
-                                        type: 'ice', iceCandidate: event.candidate, sourceName:targetName,targetName:sourceName,
-                                    });
-                                }
-                            };
-                            this.pc.ontrack = (event:any) => {
-                                // ElMessage.success('ontrack')
-                                this.remoteStream = event.streams[0];
-                            };
+  state: () => ({
+    socket: null as WebSocketAPI | null,
+    pc: null as RTCPeerConnection | null,
+    localStream: null as MediaStream | null,
+    remoteStream: null as MediaStream | null,
+    source: null as string | null,
+    target: null as string | null,
+    router: null as any,
+    pendingIceCandidates: [] as RTCIceCandidateInit[],
+    callStatus: 'idle' as CallStatus,
+    callError: null as string | null,
+    inviteTimeoutId: null as ReturnType<typeof setTimeout> | null,
+    incomingCall: null as IncomingCall | null,
+    incomingCallTimeoutId: null as ReturnType<typeof setTimeout> | null,
+    incomingCallExpiresAt: null as number | null,
+    pendingOfferSync: false,
+  }),
 
-                        })
-                    // const router = useRouter()
-                    // 路由跳转
-                    console.log(router)
-                    // Navigate to MailBox page with sourceName as query parameter
-                    // window.location.reload()
-                    this.router.push({
-                        path:'/MailBox/chatroom',
-                        query: { uid:sourceName }
-                    });
-                    //初始化PeerB的RTCPeerConnection对象
-                })
-                .catch((err) => {
-                    console.log(err);
-                    this.socket.send({
-                        type: 'reject',
-                        description: '对方拒绝了您的视频通话请求',
-                        sourceName:targetName,
-                        targetName:sourceName,
-                    });
-                    // ElMessage({
-                    //     type: 'info',
-                    //     message: '已拒绝',
-                    // })
-                })
-            //初始化PeerB的RTCPeerConnection对象
-        }, onReceiveAnswer(data: any) {
-            // ElMessage.success('onReceiveAnswer')
-            const {type, answer, sourceName} = data
-            this.pc.setRemoteDescription(new RTCSessionDescription(answer));
-            //设置远端描述
-        }, onReceiveIce(data: any) {
-            const {type, iceCandidate, sourceName} = data;
-            if(this.pc==null)
-                return
-            else {
-                // ElMessage.success('onReceiveIce')
-                this.pc.addIceCandidate(new RTCIceCandidate(iceCandidate));
-            }
+  actions: {
+    setCallState(status: CallStatus, error: string | null = null) {
+      this.callStatus = status
+      this.callError = error
+    },
 
-            //添加iceCandidate
-        },onReceiveReject(data: any) {
-            const {type, sourceName,description} = data;
-            ElMessageBox.alert(
-                description,
-                {
-                    confirmButtonText: '确定',
-                    type: 'warning',
-                }
-            ).then(() => {
-                if (this.pc) {
-                    this.pc.close();
-                    this.localStream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
-                    this.localStream = null;
-                    this.remoteStream = null;
-                    this.router.push({
-                        path:'/MailBox/index',
-                    });
-                }
-                // window.location.reload();
-            })
+    clearInviteTimeout() {
+      if (this.inviteTimeoutId) {
+        clearTimeout(this.inviteTimeoutId)
+      }
+      this.inviteTimeoutId = null
+    },
 
-        },
-        closeRTC() {
-            this.socket.send({
-                type: 'reject',
-                description: '对方已挂断',
-                sourceName: this.source,
-                targetName: this.target,
-            })
-            if (this.pc) {
-                this.pc.close();
-                this.localStream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
-                this.localStream = null;
-                this.remoteStream = null;
-                this.router.push({
-                    path:'/MailBox/index',
-                });
-            }
+    clearIncomingCall() {
+      this.clearIncomingCallTimeout()
+      this.incomingCall = null
+    },
+
+    clearIncomingCallTimeout() {
+      if (this.incomingCallTimeoutId) {
+        clearTimeout(this.incomingCallTimeoutId)
+      }
+      this.incomingCallTimeoutId = null
+      this.incomingCallExpiresAt = null
+    },
+
+    startIncomingCallTimeout() {
+      this.clearIncomingCallTimeout()
+      this.incomingCallExpiresAt = Date.now() + INVITE_TIMEOUT_MS
+        this.incomingCallTimeoutId = setTimeout(() => {
+          if (!this.incomingCall) {
+            return
+          }
+          const { sourceName, targetName } = this.incomingCall
+          this.socket?.send({
+            type: 'reject',
+            reason: 'timeout',
+            description: '对方暂时无法接听',
+            sourceName: targetName,
+            targetName: sourceName,
+          })
+        this.clearIncomingCall()
+        this.setCallState('idle')
+      }, INVITE_TIMEOUT_MS)
+    },
+
+    startInviteTimeout() {
+      this.clearInviteTimeout()
+      this.inviteTimeoutId = setTimeout(() => {
+        if (this.callStatus !== 'inviting' && this.callStatus !== 'connecting') {
+          return
         }
-    }
+
+        this.socket?.send({
+          type: 'reject',
+          reason: 'timeout',
+          description: '对方超时未接听',
+          sourceName: this.source,
+          targetName: this.target,
+        })
+
+        this.setCallState('failed', '对方未接听')
+        this.cleanupRTCState()
+        this.router?.push({
+          path: '/MailBox/index',
+        })
+      }, INVITE_TIMEOUT_MS)
+    },
+
+    async sendOffer() {
+      if (!this.pc || !this.socket) {
+        return
+      }
+      const offer = await this.pc.createOffer(offerOptions)
+      await this.pc.setLocalDescription(offer)
+      this.socket.send({
+        type: 'offer',
+        offer,
+        sourceName: this.source,
+        targetName: this.target,
+      })
+    },
+
+    sendRejectSignal(reason: RejectReason, description: string, sourceName?: string | null, targetName?: string | null) {
+      const payload = {
+        type: 'reject',
+        reason,
+        description,
+        sourceName: sourceName ?? this.source,
+        targetName: targetName ?? this.target,
+      }
+      this.socket?.send(payload)
+      setTimeout(() => {
+        this.socket?.send(payload)
+      }, 300)
+    },
+
+    endCallFromPeer(description = '通话已结束') {
+      if (!['inviting', 'ringing', 'connecting', 'connected'].includes(this.callStatus)) {
+        return
+      }
+      this.setCallState('ended', description)
+      ElMessage.warning(description)
+      this.cleanupRTCState()
+      this.router?.push({
+        path: '/MailBox/index',
+      })
+    },
+
+    bindPeerConnectionEvents() {
+      if (!this.pc) {
+        return
+      }
+
+      this.pc.onicecandidate = (event) => {
+        if (!event.candidate || !this.socket) {
+          return
+        }
+
+        this.socket.send({
+          type: 'ice',
+          iceCandidate: event.candidate,
+          sourceName: this.source,
+          targetName: this.target,
+        })
+      }
+
+      this.pc.ontrack = (event: RTCTrackEvent) => {
+        const incomingStream = event.streams[0]
+        if (incomingStream) {
+          this.remoteStream = incomingStream
+        }
+        else {
+          if (!this.remoteStream) {
+            this.remoteStream = new MediaStream()
+          }
+          const hasTrack = this.remoteStream.getTracks().some(track => track.id === event.track.id)
+          if (!hasTrack) {
+            this.remoteStream.addTrack(event.track)
+          }
+        }
+        event.track.onended = () => {
+          this.endCallFromPeer('对方已结束通话')
+        }
+        if (this.remoteStream) {
+          this.clearInviteTimeout()
+          this.setCallState('connected')
+        }
+      }
+
+      this.pc.onconnectionstatechange = () => {
+        const state = this.pc?.connectionState
+        if (!state) {
+          return
+        }
+        if (!['failed', 'closed', 'disconnected'].includes(state)) {
+          return
+        }
+        this.endCallFromPeer('对方连接已断开')
+      }
+
+      this.pc.oniceconnectionstatechange = () => {
+        const state = this.pc?.iceConnectionState
+        if (!state) {
+          return
+        }
+        if (!['failed', 'disconnected', 'closed'].includes(state)) {
+          return
+        }
+        this.endCallFromPeer('对方连接已断开')
+      }
+
+      this.pc.onsignalingstatechange = () => {
+        if (!this.pc || !this.pendingOfferSync || this.pc.signalingState !== 'stable') {
+          return
+        }
+        this.trySyncOffer()
+      }
+    },
+
+    connect(routerInstance?: any) {
+      if (!this.router && routerInstance) {
+        this.router = routerInstance
+      }
+
+      const currentUid = useUserStore().uid
+      const socketStatus = this.socket?.getStatus()
+      if (this.socket && (socketStatus === WebSocket.CONNECTING || socketStatus === WebSocket.OPEN)) {
+        this.socket.setOnReceiveAnswer(data => this.onReceiveAnswer(data))
+        this.socket.setOnReceiveOffer(data => this.onReceiveOffer(data))
+        this.socket.setOnReceiveICE(data => this.onReceiveIce(data))
+        this.socket.setOnReject(data => this.onReceiveReject(data))
+        this.source = currentUid
+        return
+      }
+
+      this.socket = new WebSocketAPI('/online-status', () => {}, true, useUserStore().token)
+
+      this.socket.setOnReceiveAnswer(data => this.onReceiveAnswer(data))
+      this.socket.setOnReceiveOffer(data => this.onReceiveOffer(data))
+      this.socket.setOnReceiveICE(data => this.onReceiveIce(data))
+      this.socket.setOnReject(data => this.onReceiveReject(data))
+      this.source = currentUid
+    },
+
+    async initRTC(target: string): Promise<MediaStream | null> {
+      if (!target) {
+        throw new Error('无效的通话目标')
+      }
+      if (!this.socket) {
+        throw new Error('信令通道未连接')
+      }
+      if (this.localStream) {
+        return this.localStream
+      }
+
+      this.target = target
+      this.pendingIceCandidates = []
+      this.cleanupPeerOnly()
+      this.pc = new RTCPeerConnection(config)
+      this.setCallState('inviting')
+      this.bindPeerConnectionEvents()
+      // 预创建视频 transceiver，确保首轮协商就包含视频 m-line
+      this.pc.addTransceiver('video', { direction: 'sendrecv' })
+
+      const stream = await navigator.mediaDevices.getUserMedia(audioOnlyConstraints)
+      this.localStream = stream
+      stream.getTracks().forEach((track) => {
+        this.pc?.addTrack(track, stream)
+      })
+
+      await this.sendOffer()
+      this.startInviteTimeout()
+      return this.localStream
+    },
+
+    async enableLocalVideo() {
+      if (!this.pc || !this.localStream) {
+        throw new Error('通话尚未初始化')
+      }
+
+      const currentTrack = this.localStream.getVideoTracks()[0]
+      if (currentTrack) {
+        currentTrack.enabled = true
+        await this.trySyncOffer()
+        return
+      }
+
+      const cameraStream = await navigator.mediaDevices.getUserMedia(videoOnlyConstraints)
+      const videoTrack = cameraStream.getVideoTracks()[0]
+      if (!videoTrack) {
+        throw new Error('未找到摄像头视频轨道')
+      }
+
+      if (!this.localStream.getVideoTracks().some(track => track.id === videoTrack.id)) {
+        this.localStream.addTrack(videoTrack)
+      }
+
+      const videoSender = this.pc.getSenders().find(sender => sender.track?.kind === 'video')
+        || this.pc.getTransceivers().find(transceiver => transceiver.sender.track?.kind === 'video' || transceiver.receiver.track.kind === 'video')?.sender
+
+      if (videoSender) {
+        await videoSender.replaceTrack(videoTrack)
+      }
+      else {
+        this.pc.addTrack(videoTrack, this.localStream)
+        await this.trySyncOffer()
+      }
+    },
+
+    async trySyncOffer() {
+      if (!this.pc || !this.socket) {
+        return
+      }
+      if (!['inviting', 'connecting', 'connected'].includes(this.callStatus)) {
+        return
+      }
+      if (this.pc.signalingState !== 'stable') {
+        this.pendingOfferSync = true
+        return
+      }
+      this.pendingOfferSync = false
+      await this.sendOffer()
+    },
+
+    async onReceiveOffer(data: any) {
+      const { offer, sourceName, targetName } = data
+
+      if (this.pc && this.target === sourceName && ['connecting', 'connected'].includes(this.callStatus)) {
+        await this.pc.setRemoteDescription(new RTCSessionDescription(offer))
+        await this.flushPendingIceCandidates()
+
+        const answer = await this.pc.createAnswer()
+        await this.pc.setLocalDescription(answer)
+        this.socket?.send({
+          type: 'answer',
+          answer,
+          sourceName: targetName,
+          targetName: sourceName,
+        })
+        return
+      }
+
+      if (this.callStatus === 'ringing' && this.incomingCall
+        && this.incomingCall.sourceName === sourceName
+        && this.incomingCall.targetName === targetName) {
+        this.incomingCall = {
+          ...this.incomingCall,
+          offer,
+        }
+        return
+      }
+
+      if (['inviting', 'ringing', 'connecting', 'connected'].includes(this.callStatus)) {
+        this.socket?.send({
+          type: 'reject',
+          reason: 'busy',
+          description: '用户正在其他通话中',
+          sourceName: targetName,
+          targetName: sourceName,
+        })
+        return
+      }
+
+      this.setCallState('ringing')
+      this.incomingCall = { offer, sourceName, targetName }
+      this.startIncomingCallTimeout()
+    },
+
+    async acceptIncomingCall() {
+      if (!this.incomingCall) {
+        return
+      }
+      const { offer, sourceName, targetName } = this.incomingCall
+      this.clearIncomingCall()
+      ElMessage({
+        type: 'success',
+        message: '已接听通话',
+      })
+
+      this.pendingIceCandidates = []
+      this.cleanupPeerOnly()
+      this.pc = new RTCPeerConnection(config)
+      this.target = sourceName
+      this.setCallState('connecting')
+      this.bindPeerConnectionEvents()
+      // 被叫侧提前声明接收视频，避免后续新增视频轨时协商不一致
+      this.pc.addTransceiver('video', { direction: 'recvonly' })
+
+      const stream = await navigator.mediaDevices.getUserMedia(audioOnlyConstraints)
+      this.localStream = stream
+      stream.getTracks().forEach((track) => {
+        this.pc?.addTrack(track, stream)
+      })
+
+      await this.pc.setRemoteDescription(new RTCSessionDescription(offer))
+      await this.flushPendingIceCandidates()
+
+      const answer = await this.pc.createAnswer()
+      await this.pc.setLocalDescription(answer)
+      this.socket?.send({
+        type: 'answer',
+        answer,
+        sourceName: targetName,
+        targetName: sourceName,
+      })
+
+      this.router?.push({
+        path: '/MailBox/chatroom',
+        query: { uid: sourceName },
+      })
+    },
+
+    declineIncomingCall(description = '对方暂时无法接听') {
+      if (!this.incomingCall) {
+        return
+      }
+      const { sourceName, targetName } = this.incomingCall
+      this.socket?.send({
+        type: 'reject',
+        reason: 'rejected',
+        description,
+        sourceName: targetName,
+        targetName: sourceName,
+      })
+      this.clearIncomingCall()
+      this.setCallState('idle')
+    },
+
+    async onReceiveAnswer(data: any) {
+      const { answer } = data
+      if (!this.pc) {
+        return
+      }
+
+      await this.pc.setRemoteDescription(new RTCSessionDescription(answer))
+      await this.flushPendingIceCandidates()
+      await this.trySyncOffer()
+      this.setCallState('connecting')
+    },
+
+    async onReceiveIce(data: any) {
+      const { iceCandidate } = data
+      if (!this.pc) {
+        return
+      }
+
+      if (!this.pc.remoteDescription) {
+        this.pendingIceCandidates.push(iceCandidate)
+        return
+      }
+
+      await this.pc.addIceCandidate(new RTCIceCandidate(iceCandidate))
+    },
+
+    onReceiveReject(data: any) {
+      const reason = (data?.reason ?? 'rejected') as RejectReason
+      const description = data?.description ?? '通话已结束'
+
+      if (this.incomingCall && data?.sourceName === this.incomingCall.sourceName) {
+        this.clearIncomingCall()
+        this.setCallState('idle')
+        ElMessage.info(description)
+        return
+      }
+
+      this.clearInviteTimeout()
+      this.setCallState(reason === 'hangup' ? 'ended' : 'failed', description)
+      ElMessage.warning(description)
+      this.cleanupRTCState()
+      this.router?.push({
+        path: '/MailBox/index',
+      })
+    },
+
+    closeRTC(reason: RejectReason = 'hangup') {
+      const reasonMap: Record<RejectReason, string> = {
+        rejected: '对方已拒绝你的通话',
+        hangup: '通话已结束',
+        timeout: '对方超时未接听',
+        busy: '对方正在其他通话中',
+        offline: '对方当前离线',
+      }
+
+      this.socket?.send({
+        type: 'reject',
+        reason,
+        description: reasonMap[reason],
+        sourceName: this.source,
+        targetName: this.target,
+      })
+
+      this.clearInviteTimeout()
+      this.setCallState('ended', reasonMap[reason])
+      this.cleanupRTCState()
+      this.router?.push({
+        path: '/MailBox/index',
+      })
+    },
+
+    leaveRTC() {
+      if (this.target && ['inviting', 'ringing', 'connecting', 'connected'].includes(this.callStatus)) {
+        this.socket?.send({
+          type: 'reject',
+          reason: 'hangup',
+          description: '通话已结束',
+          sourceName: this.source,
+          targetName: this.target,
+        })
+      }
+      this.cleanupRTCState()
+    },
+
+    async flushPendingIceCandidates() {
+      if (!this.pc || !this.pc.remoteDescription || this.pendingIceCandidates.length === 0) {
+        return
+      }
+
+      const queue = [...this.pendingIceCandidates]
+      this.pendingIceCandidates = []
+      for (const candidate of queue) {
+        await this.pc.addIceCandidate(new RTCIceCandidate(candidate))
+      }
+    },
+
+    cleanupPeerOnly() {
+      if (this.pc) {
+        this.pc.close()
+      }
+      this.pc = null
+      this.remoteStream = null
+    },
+
+    cleanupRTCState() {
+      this.clearInviteTimeout()
+      this.clearIncomingCall()
+      this.cleanupPeerOnly()
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(track => track.stop())
+      }
+      this.localStream = null
+      this.pendingIceCandidates = []
+      this.pendingOfferSync = false
+      this.target = null
+      this.callStatus = 'idle'
+      this.callError = null
+    },
+  },
 })
