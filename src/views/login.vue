@@ -34,14 +34,14 @@ const title = import.meta.env.VITE_APP_TITLE
 // 表单类型，login 登录，register 注册，reset 重置密码
 const formType = ref('login')
 const loading = ref(false)
-const redirect = ref(route.query.redirect?.toString() ?? settingsStore.settings.home.fullPath)
+const redirect = ref(route.query.redirect?.toString() ?? '/MailBox/index')
 
 // 登录
 const loginFormRef = ref<FormInstance>()
 const loginForm = ref({
-  account: sessionStorage.login_account || '',
+  account: localStorage.getItem('login_account') || '',
   password: '',
-  remember: !!sessionStorage.login_account,
+  remember: !!localStorage.getItem('login_account'),
 })
 const loginRules = ref<FormRules>({
   account: [
@@ -64,9 +64,9 @@ function handleLogin() {
       }).then((res) => {
         loading.value = false
           if (loginForm.value.remember) {
-            sessionStorage.setItem('login_account', loginForm.value.account)
+            localStorage.setItem('login_account', loginForm.value.account)
           } else {
-            sessionStorage.removeItem('login_account')
+            localStorage.removeItem('login_account')
           }
           // const socket = new WebSocketAPI('/online-status',()=>{
           //     console.log('连接成功')
@@ -188,7 +188,7 @@ const passRules=ref<FormRules>({
   ],
 })
 const resetForm = ref({
-  account:sessionStorage.login_account,
+  account: localStorage.getItem('login_account') || '',
   verifyCode: '',
   email:'',
   newPassword: '',
@@ -316,11 +316,6 @@ function sendVerifyCode(){
     })
   }
 
-}
-function testAccount(account: string) {
-  loginForm.value.account = account
-  loginForm.value.password = '123456'
-  handleLogin()
 }
 function handleValidateReset()
 {
@@ -504,6 +499,12 @@ function handleValidateReset()
         <ElButton :loading="loading" type="success" size="large" style="width: 100%; margin-top: 20px;" @click="handleValidateReset">
           下一步
         </ElButton>
+        <div class="sub-link">
+          <span class="text">想起密码了?</span>
+          <ElLink type="success" :underline="false" @click="formType = 'login'">
+            返回登录
+          </ElLink>
+        </div>
 
       </ElForm>
         <ElForm v-show="formType === 'resetPass'" :model="resetFormpass" ref="resetFormpassRef" :rules="passRules" class="login-form">
@@ -686,6 +687,28 @@ function handleValidateReset()
     align-items: center;
     justify-content: space-between;
     margin-bottom: 20px;
+
+    :deep(.el-checkbox) {
+      color: var(--el-text-color-secondary);
+    }
+
+    :deep(.el-checkbox__label) {
+      color: var(--el-text-color-secondary);
+    }
+
+    :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+      color: var(--el-text-color-secondary);
+    }
+
+    :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+    :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+      background-color: var(--el-color-success);
+      border-color: var(--el-color-success);
+    }
+
+    :deep(.el-checkbox__inner:hover) {
+      border-color: var(--el-color-success);
+    }
   }
 
   .sub-link {
@@ -699,6 +722,15 @@ function handleValidateReset()
     .text {
       margin-right: 10px;
     }
+  }
+
+  :deep(.el-link__inner) {
+    color: var(--el-color-success);
+    transition: opacity 0.16s ease;
+  }
+
+  :deep(.el-link__inner:hover) {
+    opacity: 0.85;
   }
 }
 

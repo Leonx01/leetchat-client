@@ -5,13 +5,15 @@ export default {
        api.get('/windows', {
          }),
     getPrivateMessages:(
-        // uid: string,
-        wid: string
+        wid: string,
+        page?: number,
+        size?: number
     ) =>
         api.get('/messages', {
             params: {
-                // uid,
-                wid
+                wid,
+                page,
+                size
             },
         }),
     activateWindow:(
@@ -28,4 +30,6 @@ export default {
             wid
         },
     }),
+    markWindowRead: (wid: string | number) =>
+        api.put('/window/read', null, { params: { wid } }),
 }

@@ -29,6 +29,8 @@ declare module 'vue' {
     ImagePreview: typeof import('./../components/ImagePreview/index.vue')['default']
     ImagesUpload: typeof import('./../components/ImagesUpload/index.vue')['default']
     ImageUpload: typeof import('./../components/ImageUpload/index.vue')['default']
+    IncomingCallPopup: typeof import('./../components/IncomingCallPopup/index.vue')['default']
+    IncomingMessagePopup: typeof import('./../components/IncomingMessagePopup/index.vue')['default']
     MailDetail: typeof import('./../components/MailDetail/index.vue')['default']
     Message: typeof import('./../components/Message/index.vue')['default']
     NotAllowed: typeof import('./../components/NotAllowed/index.vue')['default']

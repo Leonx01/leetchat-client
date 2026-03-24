@@ -1,7 +1,66 @@
+# Dependencies
 node_modules
-.DS_Store
-dist*
+.pnp
+.pnp.js
+
+# Build outputs
+dist
+dist-*
 dist-ssr
 *.local
+
+# IDE and editor files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+*.pem
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Cache files
 .eslintcache
 .stylelintcache
+.cache
+*.tsbuildinfo
+
+# Environment files (may contain sensitive data)
+.env.local
+.env.*.local
+
+# Testing
+coverage
+
+# Misc
+*.lock
+yarn.lock
+package-lock.json
+# pnpm-lock.yaml  # 项目使用 pnpm，通常需要提交 lock 文件以确保一致性
+
+# Temporary files
+*.tmp
+*.temp
+.temp
+tmp
+
+# Auto-generated files
+auto-imports.d.ts
+components.d.ts
+
+# Vite temporary files
+vite.config.ts.timestamp-*
+vite.config.ts.*.mjs
+
+# System files
+Thumbs.db

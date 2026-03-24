@@ -21,6 +21,7 @@ const useUserStore = defineStore(
     const token = ref(sessionStorage.token ?? '')
     const failure_time = ref(sessionStorage.failure_time ?? '')
     const avatar = ref(sessionStorage.avatar ?? '')
+    const nickname = ref(sessionStorage.nickname ?? '')
     const permissions = ref<string[]>([])
     const isLogin = computed(() => {
       let retn = false
@@ -42,6 +43,9 @@ const useUserStore = defineStore(
         sessionStorage.setItem('failure_time', res.data.failure_time)
         sessionStorage.setItem('avatar', res.data.avatar)
         sessionStorage.setItem('uid', res.data.uid)
+        const displayName = res.data.unick != null && res.data.unick !== '' ? res.data.unick : res.data.account
+        sessionStorage.setItem('nickname', displayName)
+        nickname.value = displayName
         uid.value = res.data.uid
       account.value = res.data.account
       token.value = res.data.token
@@ -78,16 +82,22 @@ const useUserStore = defineStore(
     sessionStorage.setItem('avatar', newAvatar)
     avatar.value = newAvatar
   }
+  function setNickname(newNickname: string) {
+    sessionStorage.setItem('nickname', newNickname)
+    nickname.value = newNickname
+  }
     // 登出
     async function logout(redirect = router.currentRoute.value.fullPath) {
         sessionStorage.removeItem('account')
         sessionStorage.removeItem('token')
         sessionStorage.removeItem('failure_time')
         sessionStorage.removeItem('avatar')
+        sessionStorage.removeItem('nickname')
       account.value = ''
       token.value = ''
       failure_time.value = ''
       avatar.value = ''
+      nickname.value = ''
       permissions.value = []
       routeStore.removeRoutes()
       menuStore.setActived(0)
@@ -115,9 +125,11 @@ const useUserStore = defineStore(
     return {
         uid,
         setAvatar,
+        setNickname,
       account,
       token,
       avatar,
+      nickname,
       permissions,
       isLogin,
       login,

@@ -39,6 +39,13 @@ interface IncomingCall {
   targetName: string
 }
 
+interface IncomingMessagePopup {
+  senderName: string
+  senderUid: string | number | null
+  preview: string
+  receivedAt: number
+}
+
 export const useSignalChannel = defineStore('webRTC', {
   state: () => ({
     socket: null as WebSocketAPI | null,
@@ -56,6 +63,8 @@ export const useSignalChannel = defineStore('webRTC', {
     incomingCallTimeoutId: null as ReturnType<typeof setTimeout> | null,
     incomingCallExpiresAt: null as number | null,
     pendingOfferSync: false,
+    incomingMessagePopup: null as IncomingMessagePopup | null,
+    incomingMessageTimeoutId: null as ReturnType<typeof setTimeout> | null,
   }),
 
   actions: {
@@ -82,6 +91,57 @@ export const useSignalChannel = defineStore('webRTC', {
       }
       this.incomingCallTimeoutId = null
       this.incomingCallExpiresAt = null
+    },
+
+    clearIncomingMessagePopup() {
+      if (this.incomingMessageTimeoutId) {
+        clearTimeout(this.incomingMessageTimeoutId)
+      }
+      this.incomingMessageTimeoutId = null
+      this.incomingMessagePopup = null
+    },
+
+    formatMessagePreview(fromMessage: any) {
+      if (!fromMessage) {
+        return '你收到一条新消息'
+      }
+      switch (fromMessage.type) {
+        case 'text':
+          return (fromMessage.content || '').slice(0, 80) || '你收到一条新消息'
+        case 'image':
+          return '[图片]'
+        case 'video':
+          return '[视频]'
+        case 'audio':
+          return '[音频]'
+        case 'file':
+          return `[文件] ${fromMessage.name || ''}`.trim()
+        default:
+          return '[新消息]'
+      }
+    },
+
+    onSocketMessage(data: any) {
+      if (!data || !data.fromMessage || !data.from) {
+        return
+      }
+      const currentUid = useUserStore().uid
+      const senderUid = data.from.uid ?? data.from.id ?? null
+      if (senderUid != null && String(senderUid) === String(currentUid)) {
+        return
+      }
+      this.incomingMessagePopup = {
+        senderName: data.from.uname || data.from.name || '新消息',
+        senderUid,
+        preview: this.formatMessagePreview(data.fromMessage),
+        receivedAt: Date.now(),
+      }
+      if (this.incomingMessageTimeoutId) {
+        clearTimeout(this.incomingMessageTimeoutId)
+      }
+      this.incomingMessageTimeoutId = setTimeout(() => {
+        this.clearIncomingMessagePopup()
+      }, 6000)
     },
 
     startIncomingCallTimeout() {
@@ -246,6 +306,7 @@ export const useSignalChannel = defineStore('webRTC', {
       const currentUid = useUserStore().uid
       const socketStatus = this.socket?.getStatus()
       if (this.socket && (socketStatus === WebSocket.CONNECTING || socketStatus === WebSocket.OPEN)) {
+        this.socket.setMessageHandler(data => this.onSocketMessage(data))
         this.socket.setOnReceiveAnswer(data => this.onReceiveAnswer(data))
         this.socket.setOnReceiveOffer(data => this.onReceiveOffer(data))
         this.socket.setOnReceiveICE(data => this.onReceiveIce(data))
@@ -254,8 +315,9 @@ export const useSignalChannel = defineStore('webRTC', {
         return
       }
 
-      this.socket = new WebSocketAPI('/online-status', () => {}, true, useUserStore().token)
+      this.socket = new WebSocketAPI('/online-status', data => this.onSocketMessage(data), true, useUserStore().token)
 
+      this.socket.setMessageHandler(data => this.onSocketMessage(data))
       this.socket.setOnReceiveAnswer(data => this.onReceiveAnswer(data))
       this.socket.setOnReceiveOffer(data => this.onReceiveOffer(data))
       this.socket.setOnReceiveICE(data => this.onReceiveIce(data))
@@ -453,10 +515,12 @@ export const useSignalChannel = defineStore('webRTC', {
         return
       }
 
+      if (this.callStatus !== 'connected') {
+        this.setCallState('connecting')
+      }
       await this.pc.setRemoteDescription(new RTCSessionDescription(answer))
       await this.flushPendingIceCandidates()
       await this.trySyncOffer()
-      this.setCallState('connecting')
     },
 
     async onReceiveIce(data: any) {

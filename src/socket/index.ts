@@ -6,7 +6,7 @@ import {ElMessage} from "element-plus";
 const BASE_URL = import.meta.env.VITE_APP_BASE_WS_URL;
 const MAX_RECONNECT_ATTEMPTS = 30;
 const RECONNECT_DELAY = 1000;
-const HEARTBEAT_INTERVAL = 60000;
+const HEARTBEAT_INTERVAL = 20000;
 
 const reconnectAttempts = ref(0);
 let websocketInstance: WebSocketAPI | null = null; // Singleton instance
@@ -14,6 +14,7 @@ let websocketInstance: WebSocketAPI | null = null; // Singleton instance
 class WebSocketAPI {
     private socket: WebSocket;
     private readonly keep: boolean ;
+    private messageQueue: string[];
     private callbacks: {
         resolve?: (data: any) => void,
         reject?: (error: any) => void,
@@ -26,6 +27,8 @@ class WebSocketAPI {
     private readonly url: string;
     private readonly sub: string;
     private readonly token: string;
+    private heartbeatTimer: number | null = null;
+    private reconnectTimer: number | null = null;
     // public readonly uid: string;
 
     public constructor(sub: string, messageHandler: (data: any) => void, keep: boolean = true,token:string ) {
@@ -35,6 +38,7 @@ class WebSocketAPI {
         this.keep = keep;
         this.socket = new WebSocket(this.url, [this.token]);
         this.callbacks = {};
+        this.messageQueue = [];
         this.callbacks.messageHandler=messageHandler;
         this.init();
     }
@@ -48,18 +52,28 @@ class WebSocketAPI {
         // this.socket = new WebSocket(this.url, [this.token]);
         this.socket.onopen = () => {
             console.log('WebSocket connection established.');
+            reconnectAttempts.value = 0;
+            if (this.reconnectTimer) {
+                clearTimeout(this.reconnectTimer);
+                this.reconnectTimer = null;
+            }
+            if (this.messageQueue.length > 0) {
+                const queue = [...this.messageQueue];
+                this.messageQueue = [];
+                queue.forEach((msg) => this.socket.send(msg));
+            }
             this.startHeartbeat();
         };
 
         this.socket.onclose = (event) => {
             console.log('WebSocket connection closed:', event);
+            this.stopHeartbeat();
             if(this.keep)
                 this.handleReconnect();
         };
 
         this.socket.onerror = (error) => {
             console.error('WebSocket error:', error);
-            this.handleReconnect();
         };
 
         this.socket.onmessage = (event) => {
@@ -67,35 +81,35 @@ class WebSocketAPI {
             let data = JSON.parse(event.data);
             switch (data.type) {
                 case 'offer':
-                    // ElMessage.success('收到offer')
+            
                     if (this.callbacks.onReceiveOffer) {
-                        console.log('收到offer')
-                        // ElMessage.success('收到offer')
+                        console.log('offer')
+                        
                         this.callbacks.onReceiveOffer(data);
                     }
                     break;
                 case 'answer':
                     if (this.callbacks.onReceiveAnswer) {
-                        console.log('收到answer')
-                        // ElMessage.success('收到answer')
+                        console.log('answer')
                         this.callbacks.onReceiveAnswer(data);
                     }
                     break;
                 case 'ice':
                     if (this.callbacks.onReceiveICE) {
-                        console.log('收到ice')
+                        console.log('ice')
                         this.callbacks.onReceiveICE(data);
                     }
                     break;
                     case 'reject':
-                      if(this.callbacks.onReject){
+                    if(this.callbacks.onReject){
                         this.callbacks.onReject(data);
-                      }
+                    }
+                    break;
                 default:
                     if (this.callbacks.messageHandler) {
                         this.callbacks.messageHandler(data);
                     }else
-                        console.log('未处理的消息')
+                        console.log('unknown message')
                 // this.handleMessage(data);
             }
         };
@@ -105,7 +119,6 @@ class WebSocketAPI {
       this.callbacks.onReject=callback;
     }
     setOnReceiveOffer(callback: (data: any) => void) {
-        // ElMessage.success('设置offer')
         this.callbacks.onReceiveOffer = callback;
     }
     setOnReceiveAnswer(callback: (data: any) => void) {
@@ -113,6 +126,9 @@ class WebSocketAPI {
     }
     setOnReceiveICE(callback: (data: any) => void) {
         this.callbacks.onReceiveICE = callback;
+    }
+    setMessageHandler(callback: (data: any) => void) {
+        this.callbacks.messageHandler = callback;
     }
 
     getSid() {
@@ -143,10 +159,12 @@ class WebSocketAPI {
     }
 
     public send(data: any) {
+        const payload = JSON.stringify(data);
         if (this.socket.readyState === WebSocket.OPEN) {
-            this.socket.send(JSON.stringify(data));
+            this.socket.send(payload);
         } else {
-            console.error('WebSocket connection not established.');
+            this.messageQueue.push(payload);
+            console.error('WebSocket connection not established. Message queued.');
         }
     }
 
@@ -159,12 +177,21 @@ class WebSocketAPI {
     }
 
     close() {
+        this.stopHeartbeat();
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
         this.socket.close();
         websocketInstance = null; // Reset the singleton instance when closing the connection
     }
 
     private handleReconnect() {
-        setTimeout(() => {
+        if (this.reconnectTimer) {
+            return;
+        }
+        this.reconnectTimer = window.setTimeout(() => {
+            this.reconnectTimer = null;
             reconnectAttempts.value++;
             if (reconnectAttempts.value <= MAX_RECONNECT_ATTEMPTS) {
                 // this.socket.close();
@@ -172,7 +199,7 @@ class WebSocketAPI {
                 this.init();
                 console.log('Reconnecting...');
             } else {
-                console.log('超过最大重试次数，停止重连');
+                console.log('Max reconnect attempts reached');
             }
         }, RECONNECT_DELAY);
     }
@@ -185,11 +212,18 @@ class WebSocketAPI {
     }
 
     private startHeartbeat() {
-        const heartbeatTimer = setInterval(this.sendHeartbeat.bind(this), HEARTBEAT_INTERVAL);
-        return () => {
-            clearInterval(heartbeatTimer);
-        };
+        this.stopHeartbeat();
+        this.heartbeatTimer = window.setInterval(this.sendHeartbeat.bind(this), HEARTBEAT_INTERVAL);
+    }
+
+    private stopHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
     }
 }
 
 export default WebSocketAPI;
+
+

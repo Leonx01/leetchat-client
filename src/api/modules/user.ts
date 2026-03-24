@@ -5,11 +5,10 @@ export default {
   uploadAvatar: (data: FormData) => api.post('/avatar/update', data, {
   }),
   updateUserInfo: (data: {
-    // uid: string
-    nickname: string
+    unick: string
     selfInfo: string
   }) => api.post('/userinfo/update', data, {
-    }),
+  }),
   resetPassword:(data:{
     account:string
     password:string
@@ -45,12 +44,14 @@ export default {
   }),
 
 
-  // 登录
+  // 登录（后端使用 @RequestParam，需传 application/x-www-form-urlencoded）
   login: (data: {
     account: string
     password: string
-  }) => api.post('/user/login', data, {
-  }),
+  }) => api.post('/user/login', new URLSearchParams({
+    account: data.account,
+    password: data.password,
+  }), {}),
 
   // 获取权限
   permission: () => api.get('user/permission', {

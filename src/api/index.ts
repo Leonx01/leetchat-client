@@ -22,11 +22,20 @@ api.interceptors.request.use(
             }
         }
         // ElMessage.success(api.getUri())
-        // 是否将 POST 请求参数进行字符串化处理
+        // POST：按数据类型设置 Content-Type，避免 415
         if (request.method === 'post') {
-            request.headers["Content-Type"] = 'multipart/form-data'
-            //需要添加 headers
-          // request.data = JSON.stringify(request.data)
+            if (request.data instanceof FormData) {
+                // FormData 不设置 Content-Type，由浏览器自动带 boundary
+                delete request.headers['Content-Type']
+            } else if (request.data instanceof URLSearchParams) {
+                // 表单参数（如登录 account/password），由 axios 自动设为 application/x-www-form-urlencoded
+                delete request.headers['Content-Type']
+            } else {
+                request.headers['Content-Type'] = 'application/json; charset=UTF-8'
+                if (request.data && typeof request.data === 'object' && !(request.data instanceof FormData)) {
+                    request.data = JSON.stringify(request.data)
+                }
+            }
         }
         return request
     },

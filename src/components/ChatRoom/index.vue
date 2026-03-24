@@ -18,6 +18,7 @@ const micEnabled = ref(true)
 const remoteVideoEnabled = ref(false)
 const closing = ref(false)
 const remoteTrackProbeId = ref<ReturnType<typeof setInterval> | null>(null)
+const localPrimary = ref(false)
 
 const normalizedUid = computed(() => String(props.uid ?? '').trim())
 const remoteConnected = computed(() => Boolean(signalingChannel.remoteStream))
@@ -41,6 +42,25 @@ const callHint = computed(() => {
       return signalingChannel.callError || '通话结束'
     default:
       return '正在准备媒体设备...'
+  }
+})
+
+const callStatusLabel = computed(() => {
+  switch (callStatus.value) {
+    case 'inviting':
+      return '呼叫中'
+    case 'ringing':
+      return '响铃'
+    case 'connecting':
+      return '连接中'
+    case 'connected':
+      return '通话中'
+    case 'failed':
+      return '失败'
+    case 'ended':
+      return '已结束'
+    default:
+      return '准备中'
   }
 })
 
@@ -130,6 +150,10 @@ function handleClose() {
   }
   closing.value = true
   signalingChannel.closeRTC()
+}
+
+function handleSwapWindows() {
+  localPrimary.value = !localPrimary.value
 }
 
 function resolveInitError(error: unknown): string {
@@ -224,12 +248,16 @@ watch(
         </div>
       </div>
       <div class="header-right">
-        <span class="badge" :class="`status-${callStatus}`">{{ callStatus }}</span>
+        <span class="badge" :class="`status-${callStatus}`">{{ callStatusLabel }}</span>
       </div>
     </div>
 
     <div class="video-stage">
-      <div class="remote-wrapper">
+      <div
+        class="remote-wrapper"
+        :class="{ 'is-main': !localPrimary, 'is-pip': localPrimary }"
+        @click="localPrimary && handleSwapWindows()"
+      >
         <video
           id="user-2"
           ref="remoteStreamRef"
@@ -241,10 +269,16 @@ watch(
         <div v-if="!remoteVideoEnabled" class="avatar-placeholder remote">
           <span>{{ normalizedUid || 'USER' }}</span>
         </div>
-        <div v-if="remoteConnected" class="remote-tag">对方画面</div>
+        <div v-if="remoteConnected" class="remote-tag">
+          {{ localPrimary ? '点击切换到主画面' : '对方画面' }}
+        </div>
       </div>
 
-      <div class="local-pip" :class="{ collapsed: !remoteConnected }">
+      <div
+        class="local-pip"
+        :class="{ collapsed: !remoteConnected, 'is-main': localPrimary, 'is-pip': !localPrimary }"
+        @click="!localPrimary && handleSwapWindows()"
+      >
         <video
           id="user-1"
           ref="localStreamRef"
@@ -258,7 +292,7 @@ watch(
           <img v-if="localAvatar" :src="localAvatar" alt="local-avatar">
           <span v-else>ME</span>
         </div>
-        <div class="local-tag">你</div>
+        <div class="local-tag">{{ localPrimary ? '你（主画面）' : '你（点击放大）' }}</div>
       </div>
     </div>
 
@@ -300,25 +334,20 @@ watch(
 
 .discord-room {
   position: relative;
-  min-height: 100vh;
-  background: radial-gradient(circle at top, #323a5f 0%, #202225 44%, #16181d 100%);
-  overflow: hidden;
+  min-height: calc(100vh - 60px);
+  padding: 14px;
+  background: #2f3136;
 }
 
 .room-header {
-  position: fixed;
-  top: 16px;
-  left: 16px;
-  right: 16px;
-  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(17, 19, 24, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  background: #202225;
+  border: 1px solid #3a3d44;
+  border-radius: 10px;
   padding: 12px 16px;
-  backdrop-filter: blur(10px);
+  margin-bottom: 12px;
 }
 
 .header-left {
@@ -354,20 +383,19 @@ watch(
 }
 
 .header-meta .title {
-  color: #fff;
-  font-size: 16px;
+  color: #f2f3f5;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1.2;
 }
 
 .header-meta .subtitle {
-  color: #b5bac1;
+  color: #b9bbbe;
   font-size: 12px;
   margin-top: 4px;
 }
 
 .badge {
-  text-transform: uppercase;
   font-size: 11px;
   color: #fff;
   background: #4f545c;
@@ -392,18 +420,36 @@ watch(
 
 .video-stage {
   position: relative;
-  height: 100vh;
-  padding: 88px 20px 124px;
+  height: calc(100vh - 170px);
+  min-height: 420px;
+  border-radius: 10px;
+  border: 1px solid #3a3d44;
+  background: #202225;
+  overflow: hidden;
 }
 
 .remote-wrapper {
   position: relative;
+  overflow: hidden;
+}
+
+.remote-wrapper.is-main {
   width: 100%;
   height: 100%;
-  border-radius: 18px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+}
+
+.remote-wrapper.is-pip {
+  position: absolute;
+  right: 14px;
+  bottom: 94px;
+  width: 280px;
+  height: 168px;
+  border-radius: 10px;
+  z-index: 6;
+  border: 1px solid #5865f2;
+  background: #111318;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
+  cursor: pointer;
 }
 
 .video-player {
@@ -424,8 +470,8 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(145deg, #2b2d31, #1d1f23);
-  color: #ddd;
+  background: #1e1f22;
+  color: #dcddde;
   font-size: 22px;
   font-weight: 700;
 }
@@ -440,17 +486,16 @@ watch(
 
 .remote-tag,
 .local-tag {
-  position: fixed;
+  position: absolute;
   z-index: 4;
   color: #fff;
   font-size: 12px;
   border-radius: 999px;
   padding: 4px 10px;
-  background: rgba(17, 19, 24, 0.75);
+  background: rgba(32, 34, 37, 0.88);
 }
 
 .remote-tag {
-  position: absolute;
   left: 14px;
   top: 14px;
 }
@@ -461,48 +506,57 @@ watch(
 }
 
 .local-pip {
-  position: absolute;
-  right: 28px;
-  bottom: 132px;
-  width: 230px;
-  height: 138px;
-  border-radius: 14px;
+  position: relative;
   overflow: hidden;
-  z-index: 5;
-  border: 2px solid rgba(88, 101, 242, 0.8);
-  background: #111318;
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.55);
   transition: all 0.2s ease;
 }
 
+.local-pip.is-main {
+  width: 100%;
+  height: 100%;
+}
+
+.local-pip.is-pip {
+  position: absolute;
+  right: 14px;
+  bottom: 94px;
+  width: 280px;
+  height: 168px;
+  border-radius: 10px;
+  z-index: 6;
+  border: 1px solid #5865f2;
+  background: #111318;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
+  cursor: pointer;
+}
+
 .local-pip.collapsed {
-  bottom: 132px;
-  right: 28px;
-  width: 180px;
-  height: 110px;
+  bottom: 94px;
+  right: 14px;
+  width: 220px;
+  height: 132px;
 }
 
 .control-dock {
-  position: fixed;
-  bottom: 24px;
+  position: absolute;
+  bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 12px;
+  gap: 10px;
   z-index: 20;
-  background: rgba(17, 19, 24, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  padding: 10px 12px;
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.48);
+  background: rgba(32, 34, 37, 0.94);
+  border: 1px solid #3a3d44;
+  border-radius: 14px;
+  padding: 8px 10px;
 }
 
 .control-btn {
   background: #3f4248;
   border: 0;
-  min-width: 82px;
-  height: 68px;
-  border-radius: 14px;
+  min-width: 78px;
+  height: 62px;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -541,34 +595,41 @@ watch(
 }
 
 @media screen and (max-width: 600px) {
-  .room-header {
-    top: 10px;
-    left: 10px;
-    right: 10px;
+  .discord-room {
+    min-height: calc(100vh - 52px);
+    padding: 8px;
   }
 
   .video-stage {
-    padding: 78px 10px 106px;
+    height: calc(100vh - 142px);
+    min-height: 340px;
   }
 
   .local-pip {
-    width: 130px;
-    height: 84px;
-    right: 16px;
-    bottom: 116px;
+    width: 170px;
+    height: 108px;
+    right: 8px;
+    bottom: 84px;
+  }
+
+  .remote-wrapper.is-pip {
+    width: 170px;
+    height: 108px;
+    right: 8px;
+    bottom: 84px;
   }
 
   .local-pip.collapsed {
-    width: 110px;
-    height: 70px;
-    bottom: 116px;
-    right: 16px;
+    width: 140px;
+    height: 88px;
+    bottom: 84px;
+    right: 8px;
   }
 
   .control-dock {
-    bottom: 14px;
+    bottom: 8px;
     gap: 8px;
-    padding: 8px;
+    padding: 6px;
   }
 
   .control-btn {
